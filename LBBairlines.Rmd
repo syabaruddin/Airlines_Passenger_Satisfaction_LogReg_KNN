@@ -1,0 +1,418 @@
+---
+title: "Airlines Passengers Satisfaction Prediction using Logistic Regression and K-Nearest Neighbor"
+author: "By : Syabaruddin Malik"
+output:
+  html_document:
+    df_print: paged
+    highlight: zenburn
+    theme: spacelab
+    toc: true
+    toc_float:
+      collapsed: yes
+    number_sections : true
+
+
+---
+
+
+![](C:\SyabaruddinFolder\Work\Algoritma\DATAScicourse\MachineLearning\RegressionModels\ML\regressionmodels-master/airlines.jpg)
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  comment = "#>")
+options(scipen = 9999)
+
+```
+
+
+# Introduction
+
+Hello Readers! For this project, we are using a dataset from Kaggle on Airlines Customer Satisfaction using various factors. We are going to implement the Logistic Regression and K-Nearest Neighbors model for this report to predict Airlines Passengers Satisfaction.
+
+dataset source : https://www.kaggle.com/teejmahal20/airline-passenger-satisfaction
+
+
+# Data Preparation {.tabset}
+
+## Library and Setup
+
+Before we do analysis, we need to load the required library packages.
+
+```{r}
+library(tidyverse)
+library(ggplot2)
+library(class)
+library(caret) 
+library(ggmosaic)
+library(kableExtra)
+library(lmtest)
+library(car)
+
+```
+
+## Import Data
+
+We need the data to do the analysis. Then, we have to load the dataset
+
+```{r}
+airlines <- read.csv("train.csv")
+
+head(airlines)
+```
+
+## Data Description
+
+To get to know more of our dataset, here is the thorough explanations about each variables:
+
+
+- Gender: Gender of the passengers (Female, Male)
+
+- Customer Type: The customer type (Loyal customer, disloyal customer)
+
+- Age: The actual age of the passengers
+
+- Type of Travel: Purpose of the flight of the passengers (Personal Travel, Business Travel)
+
+- Class: Travel class in the plane of the passengers (Business, Eco, Eco Plus)
+
+- Flight distance: The flight distance of this journey
+
+- Inflight wifi service: Satisfaction level of the inflight wifi service (0:Not Applicable;1-5)
+
+- Departure/Arrival time convenient: Satisfaction level of Departure/Arrival time convenient
+
+- Ease of Online booking: Satisfaction level of online booking
+
+- Gate location: Satisfaction level of Gate location
+
+- Food and drink: Satisfaction level of Food and drink
+
+- Online boarding: Satisfaction level of online boarding
+
+- Seat comfort: Satisfaction level of Seat comfort
+
+- Inflight entertainment: Satisfaction level of inflight entertainment
+
+- On-board service: Satisfaction level of On-board service
+
+- Leg room service: Satisfaction level of Leg room service
+
+- Baggage handling: Satisfaction level of baggage handling
+
+- Check-in service: Satisfaction level of Check-in service
+
+- Inflight service: Satisfaction level of inflight service
+
+- Cleanliness: Satisfaction level of Cleanliness
+
+- Departure Delay in Minutes: Minutes delayed when departure
+
+- Arrival Delay in Minutes: Minutes delayed when Arrival
+
+- Satisfaction: Airline satisfaction level(Satisfaction, neutral or dissatisfaction)
+
+
+
+
+# Exploratory Data Analysis
+
+## Check Data Type
+
+Let us check each column's data type.
+
+```{r}
+glimpse(airlines)
+```
+After we check the data type of each columns, we found that some of the columns don't have the required data type. We need to change these columns' data type for us to ease the analysis process. We also found that some columns needs to be dropped since these columns have no valuable informations for the analysis.To simplify our modeling, we are going to change the dissatified category into 0 and satisfied category into 1.
+
+```{r}
+df_airlines <- airlines %>% 
+  select(-X,-id) %>% 
+  mutate_if(is.character,as.factor) %>% 
+  mutate(satisfaction = 
+           factor(satisfaction, 
+                 levels = c("neutral or dissatisfied","satisfied"), 
+                 labels = c(0, 1)),
+         Customer.Type =
+           factor(Customer.Type, 
+                 levels = c("disloyal Customer","Loyal Customer"), 
+                 labels = c(0, 1)))
+
+glimpse(df_airlines)
+```
+All the data types are correct, we are ready to go for the next step
+
+## Check Missing Value
+
+We have to check if there is any missing values in our data set
+
+```{r}
+colSums(is.na(df_airlines))
+```
+After we checked if there is any NA values, we found out that 310 observations are NA on the arrival_delay_in_minutes column. Here, we are going to assume that the NA value on are 0.
+
+```{r}
+df_airlines$Arrival.Delay.in.Minutes <- 
+  ifelse(is.na(df_airlines$Arrival.Delay.in.Minutes)
+         , '0', df_airlines$Arrival.Delay.in.Minutes)
+df_airlines$Arrival.Delay.in.Minutes <- 
+  as.numeric(df_airlines$Arrival.Delay.in.Minutes)
+
+colSums(is.na(df_airlines))
+```
+Now there are no NA in the data. Now let us go to the next step.
+
+## Analysis
+
+To get to know more about our data, let us check the summary.
+
+```{r}
+summary(df_airlines)
+```
+Below frequency data visualization for each numerical variables
+
+```{r}
+ggplot(gather(df_airlines %>% select_if(is.numeric)), aes(value)) + 
+    geom_histogram(bins = 10) + 
+    facet_wrap(~key, scales = 'free_x')
+```
+Below frequency data visualization for each categorical variables
+
+```{r}
+ggplot(gather(df_airlines %>% select_if(is.factor)), aes(value)) + 
+    geom_bar(bins = 10) + 
+    facet_wrap(~key, scales = 'free_x') + labs(x="Categorical",
+                                               y="Value")
+```
+
+
+Some insights from the summary data, especially from the categorical variable:
+
+- In terms of Gender, it is balance between frequency of male passenger and female passenger
+- In terms of Customer type, almost 85% are loyal customer(1).
+- In terms of type of travel, only 30% is personal travel. Majority of passengers are business traveler
+- In terms of class, it is balance between Business class and Economy class. Only small amount of passengers using Economy plus class
+
+
+# Model Fitting
+
+## Logistic Regression
+
+Logistic regression is a classification algorithm used to fit a regression curve, y = f (x), where y is a categorical variable. We also call the model binomial logistic regression where in cases of the Dependent Variable are more than 2 values the model are referred to as a class of multinomial logistic regression.
+
+For our dataset, it is considered as Binomial because the target variable is 1 and 0, in which 1 is satisfied and 0 is dissatisfied.
+
+### Cross Validation
+
+Now let us check the proportion of our target variable
+
+```{r}
+prop.table(table(df_airlines$satisfaction))
+```
+We can say that our target variable is balance
+
+Now we split data for train and test with proportion 0.8
+
+```{r}
+RNGkind(sample.kind = "Rounding") 
+set.seed(901)
+
+index <- sample(nrow(df_airlines), 
+                nrow(df_airlines) *0.8) 
+
+airlines_train <- df_airlines[index, ] 
+airlines_test <- df_airlines[-index, ] 
+```
+
+now let us recheck the class imbalance between data train and test
+
+```{r}
+prop.table(table(airlines_train$satisfaction))
+prop.table(table(airlines_test$satisfaction))
+```
+We can say that our target variable in both our data train and test are balance
+
+### Model
+
+Now let us make the logistic regression model
+
+```{r}
+model_reg1 <- glm(satisfaction ~ ., data = df_airlines, family = "binomial")
+summary(model_reg1)
+```
+We found that there are 1 variable that are not signicant (flight distance). Let us try deselect this variable and check the AIC
+
+However let us check the multicolinearity of this model. If there is multicoleniarity in some variable, we can deselect also these variables
+
+```{r}
+
+vif(model_reg1)
+```
+we found out that there are 2 variables Departure.Delay.in.Minutes and Arrival.Delay.in.Minutes are colinear (VIF > 10)
+
+so let us deselect flight distance, Departure.Delay.in.Minutes and Arrival.Delay.in.Minutes variables and check the AIC and also the Multicolinearity.
+
+
+```{r}
+
+df_airlines2 = df_airlines %>% 
+  select(-Departure.Delay.in.Minutes,-Arrival.Delay.in.Minutes)
+
+model_reg2 <- glm(satisfaction ~ ., data = df_airlines2, family = "binomial")
+
+summary(model_reg2)
+```
+Now let us check the multicolnearity with this model
+
+```{r}
+vif(model_reg2)
+```
+
+summary between models:
+
+- Model_reg1 , AIC 69384, multicolinearity = present
+- Model-reg2 , AIC 69783, multicolinearity = not present
+
+Now we are safe to pick the model_reg2 for further analysis. Although the AIC is slightly below, this model pass the assumption of the multicolinearity which is not present.
+
+Let us interpetrate one of coefficient and estimate so we can easily read above summary model_reg2.
+
+```{r}
+customer_type1 <- 2.01662055
+exp(customer_type1)
+```
+Interpretation :Customer type 1 or Loyal Customer have a probability 7.5 times more to be satisfied rather than dissatisfied.
+
+### Prediction
+
+Now let us predict the probability of satisfaction using our test data with our model_reg2 and saved in new column named pred_result
+
+
+```{r}
+airlines_test$pred_result <- predict(object = model_reg2, 
+        newdata = airlines_test, 
+        type = "response")
+```
+
+Now classify the data in airlines_test based on pred_result and saved in new column namen pred_label
+
+```{r}
+airlines_test$pred_label <- ifelse(airlines_test$pred_result < 0.5 ,0, 1)
+airlines_test$pred_label <- as.factor(airlines_test$pred_label)
+head(airlines_test)
+str(airlines_test)
+```
+
+
+## K-Nearest Neighbor
+
+K-NN has its own characteristics and one of them was it is better for predictors that are numeric, therefore, in our pre-processing step here we are going to divide the categorical variables in order to make the train and test dataset.
+
+
+```{r}
+# predictor
+airlines_train_x <-
+  airlines_train %>% select(
+    -c(
+      satisfaction,
+      Gender,
+      Customer.Type,
+      Type.of.Travel,
+      Class,
+      Arrival.Delay.in.Minutes ,
+      Departure.Delay.in.Minutes,
+      Flight.Distance
+    )
+  )
+airlines_test_x <-
+  airlines_test %>% select(
+    -c(
+      satisfaction,
+      Gender,
+      Customer.Type,
+      Type.of.Travel,
+      Class,
+      Arrival.Delay.in.Minutes ,
+      Departure.Delay.in.Minutes,
+      Flight.Distance,pred_label,
+      pred_result
+    )
+  )
+
+# target
+airlines_train_y <- airlines_train %>% select(satisfaction)
+airlines_test_y <- airlines_test %>% select(satisfaction)
+```
+
+
+### Scaling
+
+```{r}
+airlines_train_xs <- scale(airlines_train_x)
+airlines_test_xs <- scale(airlines_test_x)
+
+head(airlines_test_xs)
+```
+
+
+### Prediction
+
+Now let's find the optimum K for further analysis
+
+```{r}
+round(sqrt(nrow(airlines_train_xs)))
+```
+```{r}
+airlines_knn <- knn(train=airlines_train_xs,test=airlines_test_xs, cl= airlines_train_y$satisfaction, k=288)
+
+head(airlines_knn)
+```
+
+
+# Model Evaluation
+
+To evaluate our model, we may use confusionMatrix() function from the library caret. Confusion matrix is a table that shows four different category: True Positive (TP), True Negative (TN), False Positive (FP), and False Negative (FN). After that we may use 4 metrics to evaluate the model, those are Accuracy, Sensitivity, Specificity, and Precision.
+
+![](C:\SyabaruddinFolder\Work\Algoritma\DATAScicourse\MachineLearning\RegressionModels\ML\regressionmodels-master/conf.jpg)
+
+## Logistic Regression
+
+```{r}
+conf_log <- confusionMatrix(data = airlines_test$pred_label,reference = airlines_test$satisfaction, positive = "1")
+conf_log
+```
+
+
+## K-Nearest Neighbor
+
+```{r}
+conf_knn <- confusionMatrix(data=airlines_knn,reference = as.factor(airlines_test_y$satisfaction), positive="1")
+conf_knn
+```
+
+Summary Model Evaluation:
+
+```{r}
+Model <- c("Logistic Regression", "K-Nearest Neighbor")
+Accuracy <- c(0.8736,0.8828)
+Recall <- c(0.8346,0.8248 )
+specificity <-c(0.9031,0.9265 )
+Precision <- c(0.8664,0.8942)
+
+df <- data.frame(Model, Accuracy,Recall,specificity,Precision )
+
+print (df)
+```
+
+
+# Conclusion
+
+If we look at the summary model evaluation, we can see that oth of our model perform very well in all of the metrics from Accuracy, Recall, Specificity and Precision. However, if we want a more precised model, our K-Nearest Neighbor model performs better in all metrics.
+
+Therefore, depending on what we want to achieve, for example if we only focuses on the positive classification or “satisfied” class, we may prioritize the model with higher precision value. But on the contrary, if we would like to pay attention more to both the number of correct positive and negative outcome, we might prioritize the model with high accuracy. But in this case, as previously mentioned we should refer to the K-NN model as it is better in all metrics.
+
+
+
+
